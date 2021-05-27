@@ -1,0 +1,179 @@
+---
+Resources:
+
+  MyIamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: SecretManagerReaderEC2
+      Path: "/"
+      Roles:
+      - !ImportValue RoleSecretManagerReader
+  
+  WaiterSignal:
+    Type: AWS::CloudFormation::WaitCondition
+    CreationPolicy:
+        ResourceSignal:
+          Timeout: PT5M
+
+  MyLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      Comment: Installing custom applications for my ubuntu ec2
+      AWS::CloudFormation::Init:
+        config:
+          packages:
+            apt:
+              apache2: []
+              php: []
+          groups:
+            apache: {}
+            test-group: {}
+            another-group-for-test: {}
+          users:
+            "esteban":
+              groups:
+                - test-group
+                - another-group-for-test
+              homeDir: "/home/esteban"
+          sources:
+            /home/esteban/java-app: "https://github.com/esteban0477/simple-java-maven-app/archive/refs/heads/master.zip"
+          files:
+            /home/esteban/hello.txt:
+              content: !Sub |
+                This is the value of the hello.txt file
+                I Can write multiple lines from the cfn template
+                Because I'm using the Sub built-in function, I can replace pseudo-parameters.
+                Such as:
+                Region: ${AWS::Region}
+                Account ID: ${AWS::AccountId}
+                Stack Name: ${AWS::StackName}
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+              mode: "000400"
+              owner: "root"
+              group: "root"
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.WebServerHost.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource MyLaunchTemplate --region ${AWS::Region}
+              mode: "000400"
+              owner: "root"
+              group: "root"
+          commands:
+            myCommand:
+              command: "echo \"$MAGIC\" > test.txt"
+              env: 
+                MAGIC: "This is an env variable"
+              cwd: "~"
+              test: "test ! -e ~/test.txt"
+              ignoreErrors: false
+            # Best practice is to write bash script in the files section and
+            # execute the script through commands section
+          services:
+            sysvinit:
+              enabled: true
+              ensureRunning: true
+    Properties:
+      LaunchTemplateName: !Sub "${AWS::StackName}-LT"
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt
+            - MyIamInstanceProfile
+            - Arn
+        DisableApiTermination: true
+        ImageId: !FindInMap [ AMIUbuntu, !Ref "AWS::Region" , amd64 ]
+        InstanceType: !FindInMap [ InstanceType, !Ref Enviroment, InstanceType ]
+        KeyName: !Ref KeyName
+        SecurityGroupIds: 
+          - !ImportValue BaseSecurityGroup
+        UserData:
+          "Fn::Base64":
+            !Sub |
+              #!/bin/bash -xe
+              apt-get update -y
+              apt-get install -y python-setuptools
+              mkdir -p /opt/aws/bin
+              wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+              python -m easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-latest.tar.gz
+              # Start cfn-init
+              /opt/aws/bin/cfn-init -s ${AWS::StackId} -r MyLaunchTemplate --region ${AWS::Region} || error_exit 'Failed to run cfn-init'
+              # Start up the cfn-hup daemon to listen for changes to the EC2 instance metadata
+              /opt/aws/bin/cfn-hup || error_exit 'Failed to start cfn-hup'
+              # All done so signal success
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource WaiterSignal --region ${AWS::Region}
+
+  ASGApp:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AvailabilityZones: 
+        Fn::GetAZs:
+          Ref: "AWS::Region"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs: 
+        - !ImportValue TGAssociationOutput
+      VPCZoneIdentifier:
+        - !ImportValue SubnetIDPublicSubnet01
+        - !ImportValue SubnetIDPublicSubnet02
+        - !ImportValue SubnetIDPublicSubnet03
+      DesiredCapacity: 2
+      MaxSize: 3
+      MinSize: 1
+      Tags:
+        - Key: keyname
+          Value: value
+          PropagateAtLaunch: False
+
+Parameters:
+
+  KeyName:
+    Description: An SSH Key to access the EC2 instances
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: mackey
+    ConstraintDescription: must be the name of a valid ssh key
+
+  Enviroment:
+    Description: Environment to create resources
+    Type: String
+    Default: Prod
+    AllowedValues: 
+    - Dev
+    - Test
+    - Perf
+    - Stg
+    - Prod
+    ConstraintDescription: Must be a valid environment type
+
+Mappings:
+
+  InstanceType:
+    Dev:
+      InstanceType: t2.nano
+    Test:
+      InstanceType: t2.micro
+    Perf:
+      InstanceType: t2.micro
+    Stg:
+      InstanceType: t2.micro
+    Prod:
+      InstanceType: t2.micro
+
+  AMIUbuntu:
+    us-east-1: 
+      amd64: ami-03eaf3b9c3367e75c
+      arm64: ami-06c7b46274dd03c77
+    us-east-2: 
+      amd64: ami-09135e71dc2619458
+      arm64: ami-0c8a4fc25e0148cdd
+    us-west-1: 
+      amd64: ami-0513e8ea9024b5b92
+      arm64: ami-03659b2c5b0eb3df0
+    us-west-2: 
+      amd64: ami-007e276c37b5ff2d7
+      arm64: ami-0a9325cf973896d55

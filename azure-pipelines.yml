@@ -1,0 +1,66 @@
+# Pipeline to deploy infrastructure to my AWS Account
+
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- script: echo Running Clouformation deployments!
+  displayName: 'Starting Cloudformation deployments'
+  
+- task: CloudFormationCreateOrUpdateStack@1
+  inputs:
+    awsCredentials: 'ServiceConnAWS'
+    regionName: 'us-east-2'
+    stackName: 'vpc-deployer'
+    templateSource: 'file'
+    templateFile: '$(System.DefaultWorkingDirectory)/cloudformation/template-vpc.yaml'
+    templateParametersFile: '$(System.DefaultWorkingDirectory)/config/params-vpc.json'
+
+- task: CloudFormationCreateOrUpdateStack@1
+  inputs:
+    awsCredentials: 'ServiceConnAWS'
+    regionName: 'us-east-2'
+    stackName: 'nsg-deployer'
+    templateSource: 'file'
+    templateFile: '$(System.DefaultWorkingDirectory)/cloudformation/template-nsg.yaml'
+    templateParametersFile: '$(System.DefaultWorkingDirectory)/config/params-nsg.json'
+
+- task: CloudFormationCreateOrUpdateStack@1
+  inputs:
+    awsCredentials: 'ServiceConnAWS'
+    regionName: 'us-east-2'
+    stackName: 'iam-deployer'
+    templateSource: 'file'
+    templateFile: '$(System.DefaultWorkingDirectory)/cloudformation/template-iam.yaml'
+    templateParametersFile: '$(System.DefaultWorkingDirectory)/config/params-iam.json'
+
+- task: CloudFormationCreateOrUpdateStack@1
+  inputs:
+    awsCredentials: 'ServiceConnAWS'
+    regionName: 'us-east-2'
+    stackName: 'alb-deployer'
+    templateSource: 'file'
+    templateFile: '$(System.DefaultWorkingDirectory)/cloudformation/template-alb.yaml'
+    templateParametersFile: '$(System.DefaultWorkingDirectory)/config/params-alb.json'
+
+- task: CloudFormationCreateOrUpdateStack@1
+  inputs:
+    awsCredentials: 'ServiceConnAWS'
+    regionName: 'us-east-2'
+    stackName: 'asg-deployer'
+    templateSource: 'file'
+    templateFile: '$(System.DefaultWorkingDirectory)/cloudformation/template-asg.yaml'
+    templateParametersFile: '$(System.DefaultWorkingDirectory)/config/params-asg.json'
+
+- task: CloudFormationCreateOrUpdateStack@1
+  inputs:
+    awsCredentials: 'ServiceConnAWS'
+    regionName: 'us-east-2'
+    stackName: 'rds-deployer'
+    templateSource: 'file'
+    capabilityAutoExpand: true
+    templateFile: '$(System.DefaultWorkingDirectory)/cloudformation/template-rds.yaml'
+    templateParametersFile: '$(System.DefaultWorkingDirectory)/config/params-rds.json'
